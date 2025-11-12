@@ -39,11 +39,15 @@ type ConfigurationCmd struct {
 }
 
 type BootstrapConfig struct {
-	BootstrapKind        string   `arg:"--bootstrap-kind,env:BOOTSTRAP_KIND" help:"Kind of bootsrapper to use."`
-	DNSBootstrapDomain   string   `arg:"--dns-bootstrap-domain,env:DNS_BOOTSTRAP_DOMAIN" help:"Domain to use when bootstrapping using DNS."`
-	HTTPBootstrapAddr    string   `arg:"--http-bootstrap-addr,env:HTTP_BOOTSTRAP_ADDR" help:"Address to serve for HTTP bootstrap."`
-	HTTPBootstrapPeer    string   `arg:"--http-bootstrap-peer,env:HTTP_BOOTSTRAP_PEER" help:"Peer to HTTP bootstrap with."`
-	StaticBootstrapPeers []string `arg:"--static-bootstrap-peers,env:STATIC_BOOTSTRAP_PEERS" help:"Static list of peers to bootstrap with."`
+	BootstrapKind           string   `arg:"--bootstrap-kind,env:BOOTSTRAP_KIND" help:"Kind of bootsrapper to use."`
+	DNSBootstrapDomain      string   `arg:"--dns-bootstrap-domain,env:DNS_BOOTSTRAP_DOMAIN" help:"Domain to use when bootstrapping using DNS."`
+	HTTPBootstrapAddr       string   `arg:"--http-bootstrap-addr,env:HTTP_BOOTSTRAP_ADDR" help:"Address to serve for HTTP bootstrap."`
+	HTTPBootstrapPeer       string   `arg:"--http-bootstrap-peer,env:HTTP_BOOTSTRAP_PEER" help:"Peer to HTTP bootstrap with."`
+	StaticBootstrapPeers    []string `arg:"--static-bootstrap-peers,env:STATIC_BOOTSTRAP_PEERS" help:"Static list of peers to bootstrap with."`
+	ExternalBootstrapURL    url.URL  `arg:"--external-bootstrap-url,env:EXTERNAL_BOOTSTRAP_URL" help:"External bootstrap URL."`
+	ExternalBootstrapTLSCrt string   `arg:"--external-bootstrap-tls-crt,env:EXTERNAL_BOOTSTRAP_TLS_CRT" help:"Path to external bootstrap client TLS certificate."`
+	ExternalBootstrapTLSKey string   `arg:"--external-bootstrap-tls-key,env:EXTERNAL_BOOTSTRAP_TLS_KEY" help:"Path to external bootstrap client TLS key."`
+	ExternalBootstrapCA     string   `arg:"--external-bootstrap-ca,env:EXTERNAL_BOOTSTRAP_CA" help:"Path to external bootstrap CA."`
 }
 
 type RegistryCmd struct {
@@ -306,6 +310,8 @@ func getBootstrapper(cfg BootstrapConfig) (routing.Bootstrapper, error) { //noli
 		return routing.NewHTTPBootstrapper(cfg.HTTPBootstrapAddr, cfg.HTTPBootstrapPeer), nil
 	case "static":
 		return routing.NewStaticBootstrapperFromStrings(cfg.StaticBootstrapPeers)
+	case "external":
+		return routing.NewExternalBootstrapper(cfg.ExternalBootstrapURL, cfg.ExternalBootstrapCA, cfg.ExternalBootstrapTLSCrt, cfg.ExternalBootstrapTLSKey, 10)
 	default:
 		return nil, fmt.Errorf("unknown bootstrap kind %s", cfg.BootstrapKind)
 	}

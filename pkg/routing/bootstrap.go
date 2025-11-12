@@ -2,10 +2,17 @@ package routing
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -190,4 +197,102 @@ func (bs *HTTPBootstrapper) Get(ctx context.Context) ([]peer.AddrInfo, error) {
 		return nil, err
 	}
 	return []peer.AddrInfo{*addrInfo}, nil
+}
+
+func NewExternalBootstrapper(url url.URL, caPath, crtPath, keyPath string, limit int) (*ExternalBootstrapper, error) {
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+	if len(caPath) > 0 {
+		caCert, err := os.ReadFile(filepath.Clean(caPath))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA file: %w", err)
+		}
+		caCertPool := x509.NewCertPool()
+		if !caCertPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA certificate from %s", caPath)
+		}
+		tlsConfig.RootCAs = caCertPool
+	}
+	if len(crtPath) > 0 && len(keyPath) > 0 {
+		cert, err := tls.LoadX509KeyPair(crtPath, keyPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load client certificate: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+		Timeout: 10 * time.Second,
+	}
+
+	return &ExternalBootstrapper{
+		httpClient: client,
+		url:        url,
+		limit:      limit,
+	}, nil
+}
+
+type ExternalBootstrapper struct {
+	httpClient *http.Client
+	url        url.URL
+	limit      int
+}
+
+func (eb *ExternalBootstrapper) Run(ctx context.Context, addrInfo peer.AddrInfo) error {
+	<-ctx.Done()
+	return nil
+}
+
+func (eb *ExternalBootstrapper) Get(ctx context.Context) ([]peer.AddrInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, eb.url.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := eb.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer httpx.DrainAndClose(resp.Body)
+
+	err = httpx.CheckResponseStatus(resp, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var ips []net.IPAddr
+	if err := json.Unmarshal(b, &ips); err != nil {
+		return nil, err
+	}
+
+	addrInfos := []peer.AddrInfo{}
+	for _, ip := range ips {
+		addr, err := manet.FromIPAndZone(ip.IP, ip.Zone)
+		if err != nil {
+			return nil, err
+		}
+		addrInfos = append(addrInfos, peer.AddrInfo{
+			ID:    "",
+			Addrs: []ma.Multiaddr{addr},
+		})
+	}
+
+	fmt.Printf("ExternalBootstrapper-->addrInfos: %v\n", addrInfos)
+	return addrInfos, nil
 }
